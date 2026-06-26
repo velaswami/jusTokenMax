@@ -25,6 +25,9 @@ DIFF_EXTS = {".diff", ".patch"}
 # HTML pages. Compression (drop scripts/styles/chrome, keep the content skeleton
 # as Markdown) — stdlib parser, no dependency.
 HTML_EXTS = {".html", ".htm"}
+# SVG. Compression: extract text labels (and draw.io embedded source -> Mermaid),
+# drop the verbose geometry. Stdlib only, no dependency.
+SVG_EXTS = {".svg"}
 # Source files we can compress to a signature-only skeleton (outline). Limited
 # to extensions the symbol parser (codeindex.LANGS) actually understands, so we
 # never promise an outline we can't produce.
@@ -62,6 +65,8 @@ HTML_MIN_BYTES = 4 * 1024
 # the static HTML (JS/SVG/canvas-rendered). Replacing it with a near-empty digest
 # would lose the page, so we fail open and leave the original.
 HTML_MIN_YIELD_TOKENS = 64
+# Below this an .svg is small enough to read whole (also skips tiny icons).
+SVG_MIN_BYTES = 4 * 1024
 
 # Below this a source file is short enough to read whole; an outline of a tiny
 # file rarely beats just reading it.
@@ -168,6 +173,8 @@ def _kind_for(path: str) -> str:
         return "diff"
     if ext in HTML_EXTS:
         return "html"
+    if ext in SVG_EXTS:
+        return "svg"
     if ext in CODE_EXTS:
         return "code"
     if ext in GENERIC_EXTS:
@@ -473,6 +480,41 @@ def optimize(
         if stats["images"]:
             note += f", {stats['images']} images flagged"
         res = OptimizeResult(True, "html", path, str(out), tokens_before,
+                             tokens_after, cached=False, note=note)
+
+    elif kind == "svg":
+        if os.path.getsize(path) < SVG_MIN_BYTES:
+            return OptimizeResult(False, "skip", path, None, 0, 0, False,
+                                  note="svg already small")
+        key, out = cache.cache_paths(path, opts, ".svg.md")
+        meta = cache.load_meta(key)
+        if meta and out.exists():
+            return OptimizeResult(True, "svg", path, str(out),
+                                  meta["tokens_before"], meta["tokens_after"],
+                                  cached=True, note="cache hit")
+        raw = Path(path).read_text(encoding="utf-8", errors="replace")
+        try:
+            from .svg import svg_to_markdown
+            digest, stats = svg_to_markdown(raw)
+        except Exception:
+            return OptimizeResult(False, "skip", path, None, 0, 0, False,
+                                  note="svg parse failed")
+        if not stats.get("ok"):
+            # Textless icon/illustration — nothing to extract; leave it raw.
+            return OptimizeResult(False, "skip", path, None, 0, 0, False,
+                                  note="svg has no extractable text")
+        digest = _redact(digest)
+        out.write_text(digest, encoding="utf-8")
+        tokens_before = text_tokens(raw)
+        tokens_after = text_tokens(digest)
+        cache.save_meta(key, {"tokens_before": tokens_before,
+                              "tokens_after": tokens_after,
+                              "kind": stats["kind"], "labels": stats["labels"],
+                              "nodes": stats["nodes"], "edges": stats["edges"]})
+        note = (f"{stats['nodes']} nodes, {stats['edges']} edges (mermaid)"
+                if stats["kind"] == "mermaid"
+                else f"{stats['labels']} labels")
+        res = OptimizeResult(True, "svg", path, str(out), tokens_before,
                              tokens_after, cached=False, note=note)
 
     elif kind == "code":

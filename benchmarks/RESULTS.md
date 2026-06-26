@@ -43,13 +43,14 @@ _Image note: native-vision models downscale to <=1568px anyway, so the byte savi
 | CSV (5,000 rows) | 57,340 | 237 | **-99%** |
 | delta re-read (1 edit in 600 lines) | 2,407 | 88 | **-96%** |
 | HTML page (script/style/nav chrome) | 6,939 | 606 | **-91%** |
+| SVG diagram (labels in reading order) | 10,487 | 283 | **-97%** |
 
 ## Code index (read symbols, not files)
 
-Indexed **562 symbols** across **49 files**. Cost to locate a symbol, summed over 49 lookups:
+Indexed **598 symbols** across **51 files**. Cost to locate a symbol, summed over 51 lookups:
 
 | approach | tokens |
 | --- | ---: |
-| read each whole file | 70,417 |
-| one `justokenmax query` hit each | 1,211 |
+| read each whole file | 75,641 |
+| one `justokenmax query` hit each | 1,275 |
 | **reduction** | **-98%** |

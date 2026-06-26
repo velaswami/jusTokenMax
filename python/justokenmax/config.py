@@ -6,7 +6,7 @@ to your project. A lever can be disabled two ways (either wins):
   * env:   JUSTOKENMAX_DISABLE=pdf,image      (comma-separated kinds)
   * file:  ~/.justokenmax/config.json  ->  {"disabled": ["pdf", "image"]}
 
-Kinds: pdf, image, log, json, ndjson, notebook, csv, diff, code, html,
+Kinds: pdf, image, log, json, ndjson, notebook, csv, diff, code, html, svg,
 lockfile, minified, redact. Disabling a kind
 makes optimize() skip it (the Read hook then leaves those files untouched);
 disabling `redact` stops the optional token-cutting pass (base64 blob /
@@ -24,7 +24,7 @@ from typing import Set
 from . import cache
 
 KINDS = ("pdf", "image", "log", "json", "ndjson", "notebook", "csv", "diff",
-         "code", "html", "lockfile", "minified", "redact")
+         "code", "html", "svg", "lockfile", "minified", "redact")
 
 # Ceiling for a single rendered read artifact (e.g. a file outline). When the
 # output would exceed this, the producer keeps the most salient parts and marks

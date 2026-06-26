@@ -63,7 +63,7 @@ def main(argv=None) -> int:
     common.add_argument("--max-edge", type=int, default=None,
                         help="override max image long edge (px)")
 
-    for name in ("optimize", "pdf", "image", "logs", "json", "html"):
+    for name in ("optimize", "pdf", "image", "logs", "json", "html", "svg"):
         sub.add_parser(name, parents=[common]).add_argument("files", nargs="+")
 
     pr = sub.add_parser("retrieve", help="get the original behind an optimized artifact")

@@ -211,13 +211,48 @@ def test_boilerplate_chrome_dropped():
 
 # ---- SVG (flag, like images) ----
 
-def test_svg_diagram_is_flagged():
+def test_inline_svg_text_is_extracted():
+    # An inline SVG with text labels is now extracted (not dropped+flagged).
     md, stats = html_to_markdown(
         "<body><p>real prose here</p>"
-        "<svg><text>node A</text><text>node B</text></svg></body>")
+        '<svg><text x="0" y="0">node A</text>'
+        '<text x="0" y="50">node B</text></svg></body>')
+    assert "node A" in md and "node B" in md
+    assert "real prose here" in md
+    assert stats["svgs"] == 0               # extracted, so not flagged
+
+
+def test_textless_inline_svg_is_flagged():
+    # A path-only SVG (icon) has nothing to extract -> still flagged like an image.
+    md, stats = html_to_markdown(
+        "<body><p>prose</p><svg><path d='M0 0 L9 9'/></svg></body>")
     assert stats["svgs"] == 1
     assert "diagram(s)/SVG not extracted" in md
-    assert "real prose here" in md          # the prose still extracts
+
+
+def test_unclosed_inline_svg_still_emits():
+    # truncated page: <svg> never closes — its captured label must not be lost
+    md, _ = html_to_markdown(
+        "<body><p>before</p><svg><text x='1' y='1'>kept label</text>")
+    assert "kept label" in md
+
+
+def test_inline_drawio_svg_becomes_mermaid():
+    import base64, urllib.parse, zlib
+    model = ('<mxGraphModel><root>'
+             '<mxCell id="2" value="Plan" vertex="1"/>'
+             '<mxCell id="3" value="Ship" vertex="1"/>'
+             '<mxCell id="4" edge="1" source="2" target="3"/>'
+             '</root></mxGraphModel>')
+    c = zlib.compressobj(9, zlib.DEFLATED, -15)
+    payload = urllib.parse.quote(
+        base64.b64encode(c.compress(model.encode()) + c.flush()).decode())
+    mxfile = f'<mxfile><diagram>{payload}</diagram></mxfile>'
+    esc = mxfile.replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;").replace(">", "&gt;")
+    md, _ = html_to_markdown(
+        f'<body><svg content="{esc}"><text>fallback</text></svg></body>')
+    assert "```mermaid" in md
+    assert "Plan" in md and "Ship" in md and "-->" in md
 
 
 # ---- low-yield guard (JS/SVG/canvas pages -> fail open, keep the original) ----

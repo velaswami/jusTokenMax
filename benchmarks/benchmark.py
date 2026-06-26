@@ -391,6 +391,20 @@ def bench_html():
     return tb, ta, (100 * (tb - ta) // tb if tb else 0)
 
 
+def bench_svg():
+    """A verbose SVG diagram (paths + labels) collapses to its text labels —
+    stdlib only, no dependency."""
+    from justokenmax.svg import svg_to_markdown
+    paths = "".join(f'<path d="M{i}.123456 {i}.987654 L{i+1}.5 {i+2}.5" '
+                    f'stroke="#6366f1" fill="none"/>' for i in range(300))
+    labels = "".join(f'<text x="20" y="{i*24}">pipeline step {i} '
+                     f'(service node)</text>' for i in range(30))
+    svg = f'<svg xmlns="http://www.w3.org/2000/svg">{paths}{labels}</svg>'
+    md, _ = svg_to_markdown(svg)
+    tb, ta = _count2(svg), _count2(md)
+    return tb, ta, (100 * (tb - ta) // tb if tb else 0)
+
+
 def bench_delta():
     import difflib
     base = [f"line {i}" for i in range(600)]
@@ -422,6 +436,7 @@ def main():
     csv_tb, csv_ta, csv_pct = bench_csv()
     d_tb, d_ta, d_pct = bench_delta()
     h_tb, h_ta, h_pct = bench_html()
+    s_tb, s_ta, s_pct = bench_svg()
     idx = bench_index()
 
     lines = []
@@ -483,6 +498,8 @@ def main():
                  f"{human(d_ta)} | **-{d_pct}%** |")
     lines.append(f"| HTML page (script/style/nav chrome) | {human(h_tb)} | "
                  f"{human(h_ta)} | **-{h_pct}%** |")
+    lines.append(f"| SVG diagram (labels in reading order) | {human(s_tb)} | "
+                 f"{human(s_ta)} | **-{s_pct}%** |")
 
     lines.append("\n## Code index (read symbols, not files)\n")
     lines.append(f"Indexed **{human(idx['symbols'])} symbols** across "

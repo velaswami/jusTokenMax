@@ -52,6 +52,7 @@ cheaper equivalent, **before** it costs you a token.
 | CSV (thousands of rows) | **−99%** |
 | Git diff (lockfile churn) | lockfile → 1 line |
 | HTML page (script/style/nav chrome) | **−91%** |
+| SVG diagram (labels / draw.io→Mermaid) | **−97%** |
 | Finding a symbol vs reading the file | **−97%** |
 
 ---
@@ -226,6 +227,7 @@ Code hook) — see [`integrations/opencode/`](integrations/opencode/).
 | **CSV / tabular** | large tables | header + inferred column types + sample rows + row count | **−99%** |
 | **Git diffs** | lockfile/generated churn | keep code hunks, collapse lockfile/generated/minified file diffs to one line | lockfile → 1 line |
 | **HTML** | `.html`/`.htm` pages | drop scripts/styles/nav chrome, keep the content skeleton (headings, lists, tables, code, links) as Markdown; images flagged | **−91%** |
+| **SVG** | `.svg` + inline `<svg>` | extract `<text>` labels in reading order; draw.io exports decode their embedded source to true **Mermaid**; textless icons flagged | **−97%** |
 | **Delta reads** | re-reading the same file | return only the diff since the last read, not the whole file | **−96%** |
 | **Redaction** | secrets & blobs in text | mask API keys/tokens/passwords, elide base64/data-URIs (tokens **+** safety) | safety + tokens |
 | **Code index + outline** | reading whole files to find code | symbol map (`file:line` + signature) + file outlines so you read only the relevant range | **−97%** to locate a symbol |
@@ -294,6 +296,7 @@ model at a conservative ~1,500 tokens/page. Full detail (regenerable) in
 | CSV, 5,000 rows | 57,340 | 237 | **−99%** |
 | delta re-read, 1 edit in 600 lines | 2,407 | 88 | **−96%** |
 | HTML page (script/style/nav chrome) | 6,939 | 606 | **−91%** |
+| SVG diagram (labels in reading order) | 5,736 | 172 | **−97%** |
 
 HTML uses only the standard library (`html.parser`) — **no new dependency** — and
 drops scripts/styles/navigation chrome while preserving the content skeleton
@@ -302,6 +305,14 @@ delivered without a `.html` name (saved `.txt` / no extension) by sniffing the
 opening tag. When a page is JS/SVG/canvas-rendered and static extraction would
 yield almost nothing, it **fails open and leaves the original** rather than
 replace it with an empty digest (so the agent can still read the raw page).
+
+SVG (standalone `.svg` and inline `<svg>`) extracts `<text>` labels in reading
+order — also stdlib, no dependency. A **draw.io** export carries its source
+mxGraph in the root `content` attribute (base64+deflate), which is decoded to
+true **Mermaid** (nodes + edges); textless icons are flagged like images. The
+flowchart above goes 5,736 → 172 tokens with its steps recovered. We deliberately
+don't reconstruct edges from raw geometry — that's fragile guesswork; faithful
+structure comes only from embedded source.
 
 **Code index** — locating a symbol vs reading the file, over 21 lookups in
 jusTokenMax's own source: **16,691 → 486 tokens (−97%)**. **Images** — 3000×2000
@@ -365,13 +376,13 @@ justokenmax config enable pdf         # back on
 JUSTOKENMAX_DISABLE=pdf,image justokenmax optimize x.pdf   # one-off, via env
 ```
 
-Kinds: `pdf image log json notebook csv diff html redact`. A disabled kind is skipped
+Kinds: `pdf image log json notebook csv diff html svg redact`. A disabled kind is skipped
 by `optimize()` and left untouched by the Read hook.
 
 ### Plugin surface
 
 - **Hook:** `PreToolUse(Read)` transparently rewrites a `Read` of a PDF / image /
-  `.log` / JSON / `.ipynb` / CSV / diff / HTML to the cheap artifact via `updatedInput`.
+  `.log` / JSON / `.ipynb` / CSV / diff / HTML / SVG to the cheap artifact via `updatedInput`.
   It **never blocks a Read** — any failure falls through untouched.
 - **MCP server:** `.mcp.json` launches a stdlib stdio server exposing
   `justokenmax_optimize`, `_compress_json`, `_compress_log`, `_compress_diff`,
@@ -402,7 +413,7 @@ open. Secrets and base64 blobs are masked inside every text digest.
 
 ```bash
 cd python && pip install -e . pytest pdfplumber
-pytest -q      # pdf, image, log, json, notebook, csv, diff, html, delta, redact, code-index, outline, optimize, cli, hook, mcp
+pytest -q      # pdf, image, log, json, notebook, csv, diff, html, svg, delta, redact, code-index, outline, optimize, cli, hook, mcp
 ```
 
 ## Results — measured savings

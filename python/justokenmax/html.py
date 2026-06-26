@@ -39,14 +39,17 @@ import re
 from html.parser import HTMLParser
 from typing import List, Tuple
 
+from .svg import _f as _svg_f, render as _render_svg
+
 # Safety cap, same rationale as the other handlers — the Read hook runs this on
 # untrusted input, so bound the work and the disk write.
 MAX_OUTPUT_CHARS = 5_000_000
 
 _TRUNCATED = "\n\n> _[justokenmax: output truncated — document exceeds safety caps]_\n"
 
-# Tags whose entire subtree is non-content and dropped.
-_DROP = {"script", "style", "noscript", "svg", "template", "form", "head"}
+# Tags whose entire subtree is non-content and dropped. (svg is handled
+# specially — its text/draw.io-source is extracted, not dropped.)
+_DROP = {"script", "style", "noscript", "template", "form", "head"}
 # Navigation chrome dropped by default (tag-based, never content-scored).
 _BOILER = {"nav", "header", "footer", "aside"}
 _HEADINGS = {"h1": "# ", "h2": "## ", "h3": "### ",
@@ -78,9 +81,16 @@ class _Extractor(HTMLParser):
         self.pre_buf: List[str] = []    # raw text inside <pre> (whitespace kept)
         self.list_depth = 0
         self.images = 0
-        self.svgs = 0                   # inline SVG diagrams (dropped, flagged)
+        self.svgs = 0                   # textless SVGs (dropped, flagged)
         self.tables = 0
         self.saw_tag = False
+        # inline-SVG capture (text/draw.io source extracted via svg.py)
+        self.in_svg = 0
+        self._svg_content = None
+        self._svg_labels: List[tuple] = []
+        self._svg_in_text = False
+        self._svg_buf: List[str] = []
+        self._svg_xy = (0.0, 0.0)
         self._href = ""
         # table state — current rows/row, with a stack for nested tables and a
         # stack of (inline buffer, prefix) for the cell currently being filled.
@@ -112,14 +122,39 @@ class _Extractor(HTMLParser):
     def _drop(self, tag):
         return tag in _DROP or tag in _BOILER
 
+    def _emit_block(self, md):
+        """Place an already-rendered block (e.g. extracted SVG) into the output —
+        inline if we're inside a table cell, else as its own block."""
+        md = md.strip()
+        if not md:
+            return
+        if self._cell_stack:
+            if self.cur and not self.cur[-1].endswith(" "):
+                self.cur.append(" ")
+            self.cur.append(md.replace("\n", " "))
+        else:
+            self._flush()
+            self.out.append(md)
+
     # -- tag handlers --
     def handle_starttag(self, tag, attrs):
         self.saw_tag = True
-        if tag == "title":
+        if tag == "title" and not self.in_svg:
             self.in_title = True
             return
         if tag == "svg" and not self.skip:
-            self.svgs += 1          # flag the diagram (its subtree is dropped)
+            self.in_svg += 1                    # capture this subtree, don't drop
+            if self.in_svg == 1:
+                self._svg_content = dict(attrs).get("content")
+                self._svg_labels = []
+            return
+        if self.in_svg:                         # inside a captured SVG
+            if tag == "text":
+                self._svg_in_text = True
+                self._svg_buf = []
+                a = dict(attrs)
+                self._svg_xy = (_svg_f(a.get("y")), _svg_f(a.get("x")))
+            return                              # ignore all other SVG geometry
         if self._drop(tag):
             self.skip += 1
             return
@@ -166,8 +201,25 @@ class _Extractor(HTMLParser):
             self._flush()
 
     def handle_endtag(self, tag):
-        if tag == "title":
+        if tag == "title" and not self.in_svg:
             self.in_title = False
+            return
+        if tag == "svg" and self.in_svg:
+            self.in_svg -= 1
+            if self.in_svg == 0:
+                md, stats = _render_svg(self._svg_content, self._svg_labels)
+                if stats["ok"]:
+                    self._emit_block(md)        # mermaid or labels, inline
+                else:
+                    self.svgs += 1              # textless -> flag like an image
+                self._svg_content, self._svg_labels = None, []
+            return
+        if self.in_svg:
+            if tag == "text" and self._svg_in_text:
+                t = " ".join("".join(self._svg_buf).split())
+                if t:
+                    self._svg_labels.append((self._svg_xy[0], self._svg_xy[1], t))
+                self._svg_in_text = False
             return
         if self._drop(tag):
             if self.skip:
@@ -215,6 +267,10 @@ class _Extractor(HTMLParser):
     def handle_data(self, data):
         if self.in_title:
             self.title += data
+            return
+        if self.in_svg:
+            if self._svg_in_text:
+                self._svg_buf.append(data)
             return
         if self.skip:
             return
@@ -264,6 +320,14 @@ class _Extractor(HTMLParser):
     def _finalize(self):
         # Truncated input is common in agent contexts (a fetch cut off, an upstream
         # size cap). Finalize any block left open so its content isn't lost.
+        if self.in_svg:
+            md, stats = _render_svg(self._svg_content, self._svg_labels)
+            if stats["ok"]:
+                self._emit_block(md)
+            elif stats["labels"] == 0 and self._svg_content is None:
+                self.svgs += 1
+            self.in_svg = 0
+            self._svg_content, self._svg_labels = None, []
         if self.in_pre and self.pre_buf:
             code = "".join(self.pre_buf).strip("\n")
             self.in_pre = False
